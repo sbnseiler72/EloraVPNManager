@@ -96,7 +96,7 @@ class MHSANAEI:
         return None
 
     def _post_headers(self):
-        headers = self._post_headers()
+        headers = {"Content-type": "application/json", "Accept": "text/plain"}
         if self._csrf_token:
             headers["X-CSRF-Token"] = self._csrf_token
         return headers
