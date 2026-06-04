@@ -50,7 +50,7 @@ class MHSANAEI:
         req = requests.request(
             "POST",
             login_url,
-            data=payload,
+            json=payload,
             verify=False,
             timeout=config.X_UI_REQUEST_TIMEOUT,
         )
@@ -78,7 +78,7 @@ class MHSANAEI:
 
     def get_client_stat(self, email: str):
         try:
-            url = f"{self._base_api_url}/inbounds/getClientTraffics/{email}"
+            url = f"{self._base_api_url}/clients/traffic/{email}"
             client_stat = requests.get(
                 url,
                 cookies=self._login_cookies,
@@ -106,7 +106,7 @@ class MHSANAEI:
     def reset_client_traffic(self, inbound_id: int, email: str):
         headers = {"Content-type": "application/json", "Accept": "text/plain"}
 
-        url = f"{self._base_api_url}/inbounds/{inbound_id}/resetClientTraffic/{email}"
+        url = f"{self._base_api_url}/clients/resetTraffic/{email}"
 
         logger.debug(f"Final url for reset client traffic is: {url}")
 
@@ -133,7 +133,7 @@ class MHSANAEI:
     def reset_clients_traffic(self, inbound_id: int):
         headers = {"Content-type": "application/json", "Accept": "text/plain"}
 
-        url = f"{self._base_api_url}/inbounds/resetAllClientTraffics/{inbound_id}"
+        url = f"{self._base_api_url}/clients/resetAllTraffics"
 
         logger.info(f"Final url for reset client traffic is: {url}")
 
@@ -159,11 +159,26 @@ class MHSANAEI:
             return False
 
     def delete_client(self, inbound_id: int, uuid: str):
-
         try:
             headers = {"Content-type": "application/json", "Accept": "text/plain"}
 
-            url = f"{self._base_api_url}/inbounds/{inbound_id}/delClient/{uuid}"
+            # New API deletes by email; look up the email from the inbound's client list.
+            clients = self.get_inbound_clients(inbound_id)
+            if not clients:
+                logger.warn(f"No clients found in inbound {inbound_id} for uuid {uuid}")
+                return False
+
+            client_email = None
+            for client in clients:
+                if client.get("id") == uuid:
+                    client_email = client.get("email")
+                    break
+
+            if client_email is None:
+                logger.warn(f"Client with uuid {uuid} not found in inbound {inbound_id}")
+                return False
+
+            url = f"{self._base_api_url}/clients/del/{client_email}"
 
             logger.debug(f"Final url for delete client is: {url}")
 
@@ -201,20 +216,25 @@ class MHSANAEI:
         try:
             headers = {"Content-type": "application/json", "Accept": "text/plain"}
 
-            url = f"{self._base_api_url}/inbounds/addClient"
+            url = f"{self._base_api_url}/clients/add"
 
-            logger.debug(f"Final url fro add client is: {url}")
+            logger.debug(f"Final url for add client is: {url}")
 
-            payload_add_client = MHSANAEI.get_client_payload(
-                data_limit,
-                email,
-                enable,
-                expire_time,
-                inbound_id,
-                uuid,
-                ip_limit=ip_limit,
-                flow=flow,
-            )
+            payload_add_client = json.dumps({
+                "client": {
+                    "id": uuid,
+                    "flow": flow,
+                    "alterId": 0,
+                    "email": email,
+                    "limitIp": ip_limit,
+                    "totalGB": data_limit,
+                    "expiryTime": expire_time,
+                    "enable": enable,
+                    "tgId": "",
+                    "subId": "",
+                },
+                "inboundIds": [inbound_id],
+            })
 
             logger.debug(f"Final payload to add client is: {payload_add_client}")
 
@@ -253,27 +273,29 @@ class MHSANAEI:
         try:
             headers = {"Content-type": "application/json", "Accept": "text/plain"}
 
-            url = f"{self._base_api_url}/inbounds/updateClient/{uuid}"
+            url = f"{self._base_api_url}/clients/update/{email}"
 
             logger.debug(f"Final url for update client is: {url}")
 
-            payload_add_client = MHSANAEI.get_client_payload(
-                data_limit,
-                email,
-                enable,
-                expire_time,
-                inbound_id,
-                uuid,
-                ip_limit=ip_limit,
-                flow=flow,
-            )
+            payload_update_client = json.dumps({
+                "id": uuid,
+                "flow": flow,
+                "alterId": 0,
+                "email": email,
+                "limitIp": ip_limit,
+                "totalGB": data_limit,
+                "expiryTime": expire_time,
+                "enable": enable,
+                "tgId": "",
+                "subId": "",
+            })
 
-            logger.debug(f"Final payload to update is: {payload_add_client}")
+            logger.debug(f"Final payload to update is: {payload_update_client}")
 
             response = requests.post(
                 url,
                 cookies=self._login_cookies,
-                data=payload_add_client,
+                data=payload_update_client,
                 verify=False,
                 headers=headers,
                 timeout=config.X_UI_REQUEST_TIMEOUT,
@@ -332,7 +354,7 @@ class MHSANAEI:
         try:
             logger.debug(f"Get clients from {self._host.name} inbound {inbound_id}")
 
-            url = f"{self._base_api_url}/inbounds/list"
+            url = f"{self._base_api_url}/inbounds/get/{inbound_id}"
 
             response = requests.get(
                 url,
@@ -343,12 +365,8 @@ class MHSANAEI:
 
             data = response.json()
 
-            remote_inbound_list = data["obj"]
-
-            if remote_inbound_list is not None:
-                for remote_inbound in remote_inbound_list:
-                    if int(remote_inbound["id"]) == inbound_id:
-                        return remote_inbound["clientStats"]
+            if data.get("obj") is not None:
+                return data["obj"].get("clientStats")
 
             return None
         except Exception as error:
@@ -409,7 +427,8 @@ class MHSANAEI:
             settings = data["obj"]["settings"]
 
             if settings:
-                setting_obj = json.loads(settings)
+                # New API returns settings as a nested object; legacy versions return a JSON string.
+                setting_obj = json.loads(settings) if isinstance(settings, str) else settings
                 clients = setting_obj["clients"]
                 return clients
             else:
