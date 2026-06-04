@@ -27,6 +27,7 @@ class MHSANAEI:
             api_path=host.api_path, ssl=self._host.master
         )
         self._login_cookies = self._get_login_cookie()
+        self._csrf_token = self._fetch_csrf_token()
 
     def _generate_base_url(self, ssl: bool = False, api_path: str = ""):
         address = self._host.ip if self._host.domain is None else self._host.domain
@@ -77,6 +78,29 @@ class MHSANAEI:
         logger.info(f"Login status: {req.status_code}, cookies: {dict(session.cookies)}, response: {req.text[:200]}")
         return session.cookies
 
+    def _fetch_csrf_token(self):
+        base_url = self._base_api_url.replace("/panel/api", "")
+        try:
+            resp = requests.get(
+                base_url + "/csrf-token",
+                cookies=self._login_cookies,
+                verify=False,
+                timeout=config.X_UI_REQUEST_TIMEOUT,
+            )
+            if resp.status_code == 200:
+                token = resp.json().get("obj")
+                logger.info(f"Post-login CSRF token fetched: {bool(token)}")
+                return token
+        except Exception as e:
+            logger.warn(f"Could not fetch post-login CSRF token: {e}")
+        return None
+
+    def _post_headers(self):
+        headers = self._post_headers()
+        if self._csrf_token:
+            headers["X-CSRF-Token"] = self._csrf_token
+        return headers
+
     @staticmethod
     def get_account_email_prefix(inbound_key: int, email: str):
         return "%s_%s" % (inbound_key, email)
@@ -124,7 +148,7 @@ class MHSANAEI:
             return None
 
     def reset_client_traffic(self, inbound_id: int, email: str):
-        headers = {"Content-type": "application/json", "Accept": "text/plain"}
+        headers = self._post_headers()
 
         url = f"{self._base_api_url}/clients/resetTraffic/{email}"
 
@@ -151,7 +175,7 @@ class MHSANAEI:
             return False
 
     def reset_clients_traffic(self, inbound_id: int):
-        headers = {"Content-type": "application/json", "Accept": "text/plain"}
+        headers = self._post_headers()
 
         url = f"{self._base_api_url}/clients/resetAllTraffics"
 
@@ -180,7 +204,7 @@ class MHSANAEI:
 
     def delete_client(self, inbound_id: int, uuid: str):
         try:
-            headers = {"Content-type": "application/json", "Accept": "text/plain"}
+            headers = self._post_headers()
 
             # New API deletes by email; look up the email from the inbound's client list.
             clients = self.get_inbound_clients(inbound_id)
@@ -234,7 +258,7 @@ class MHSANAEI:
     ):
 
         try:
-            headers = {"Content-type": "application/json", "Accept": "text/plain"}
+            headers = self._post_headers()
 
             url = f"{self._base_api_url}/clients/add"
 
@@ -291,7 +315,7 @@ class MHSANAEI:
         enable: bool = True,
     ):
         try:
-            headers = {"Content-type": "application/json", "Accept": "text/plain"}
+            headers = self._post_headers()
 
             url = f"{self._base_api_url}/clients/update/{email}"
 
