@@ -331,7 +331,7 @@ class MHSANAEI:
                 "totalGB": data_limit,
                 "expiryTime": expire_time,
                 "enable": enable,
-                "tgId": "",
+                "tgId": 0,
                 "subId": "",
             })
 
@@ -382,7 +382,7 @@ class MHSANAEI:
             "totalGB": data_limit,
             "expiryTime": expire_time,
             "enable": enable,
-            "tgId": "",
+            "tgId": 0,
             "subId": "",
         }
         clients = [client]
