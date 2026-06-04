@@ -57,7 +57,7 @@ class MHSANAEI:
             )
             if csrf_resp.status_code == 200:
                 csrf_token = csrf_resp.json().get("obj")
-                logger.info(f"CSRF token fetched: {bool(csrf_token)}")
+                logger.debug(f"Pre-login CSRF token fetched: {bool(csrf_token)}")
         except Exception as e:
             logger.warn(f"Could not fetch CSRF token: {e}")
 
@@ -67,7 +67,7 @@ class MHSANAEI:
         if csrf_token:
             headers["X-CSRF-Token"] = csrf_token
 
-        logger.info("Try login with url: " + login_url)
+        logger.debug("Try login with url: " + login_url)
         req = session.post(
             login_url,
             data=payload,
@@ -75,7 +75,10 @@ class MHSANAEI:
             verify=False,
             timeout=config.X_UI_REQUEST_TIMEOUT,
         )
-        logger.info(f"Login status: {req.status_code}, cookies: {dict(session.cookies)}, response: {req.text[:200]}")
+        if req.status_code == 200:
+            logger.info(f"Login successful for host {self._host.name}")
+        else:
+            logger.warn(f"Login failed for host {self._host.name}: status {req.status_code}")
         return session.cookies
 
     def _fetch_csrf_token(self):
@@ -89,7 +92,7 @@ class MHSANAEI:
             )
             if resp.status_code == 200:
                 token = resp.json().get("obj")
-                logger.info(f"Post-login CSRF token fetched: {bool(token)}")
+                logger.debug(f"Post-login CSRF token fetched: {bool(token)}")
                 return token
         except Exception as e:
             logger.warn(f"Could not fetch post-login CSRF token: {e}")
@@ -152,7 +155,7 @@ class MHSANAEI:
 
         url = f"{self._base_api_url}/clients/resetTraffic/{email}"
 
-        logger.info(f"Final url for reset client traffic is: {url}")
+        logger.debug(f"Final url for reset client traffic is: {url}")
 
         try:
             response = requests.post(
@@ -163,8 +166,8 @@ class MHSANAEI:
                 timeout=config.X_UI_REQUEST_TIMEOUT,
             )
             data = response.json()
-            logger.info(f"reset_client_traffic response code: {response.status_code}")
-            logger.info(f"reset_client_traffic response text: {response.text}")
+            logger.debug(f"Response code: {response.status_code}")
+            logger.debug(f"Response text: {response.text}")
 
             if response.status_code == 200 and data["success"] == True:
                 return True
@@ -179,7 +182,7 @@ class MHSANAEI:
 
         url = f"{self._base_api_url}/clients/resetAllTraffics"
 
-        logger.info(f"Final url for reset client traffic is: {url}")
+        logger.debug(f"Final url for reset clients traffic is: {url}")
 
         try:
             response = requests.post(
@@ -234,8 +237,8 @@ class MHSANAEI:
                 timeout=config.X_UI_REQUEST_TIMEOUT,
             )
             data = response.json()
-            logger.info(f"Response code: {response.status_code}")
-            logger.info(f"Response text: {response.text}")
+            logger.debug(f"Response code: {response.status_code}")
+            logger.debug(f"Response text: {response.text}")
 
             if response.status_code == 200 and data["success"] == True:
                 return True
@@ -262,7 +265,7 @@ class MHSANAEI:
 
             url = f"{self._base_api_url}/clients/add"
 
-            logger.info(f"Final url for add client is: {url}")
+            logger.debug(f"Final url for add client is: {url}")
 
             payload_add_client = json.dumps({
                 "client": {
@@ -280,8 +283,6 @@ class MHSANAEI:
                 "inboundIds": [inbound_id],
             })
 
-            logger.info(f"Final payload to add client is: {payload_add_client}")
-
             response = requests.post(
                 url,
                 cookies=self._login_cookies,
@@ -291,14 +292,14 @@ class MHSANAEI:
                 timeout=config.X_UI_REQUEST_TIMEOUT,
             )
 
-            logger.info(f"add_client response code: {response.status_code}")
-            logger.info(f"add_client response text: {response.text[:500]}")
-
             data = response.json()
+
+            logger.debug(f"add_client response code: {response.status_code}")
 
             if response.status_code == 200 and data["success"] == True:
                 return True
             else:
+                logger.warn(f"add_client failed: {response.status_code} {response.text[:200]}")
                 return False
         except Exception as error:
             logger.warn(f"add_client error: {error}")
@@ -335,8 +336,6 @@ class MHSANAEI:
                 "subId": "",
             })
 
-            logger.debug(f"Final payload to update is: {payload_update_client}")
-
             response = requests.post(
                 url,
                 cookies=self._login_cookies,
@@ -348,11 +347,11 @@ class MHSANAEI:
             data = response.json()
 
             logger.debug(f"Response code: {response.status_code}")
-            logger.debug(f"Response text: {response.text}")
 
             if response.status_code == 200 and data["success"] is True:
                 return True
             else:
+                logger.warn(f"update_client failed: {response.status_code} {response.text[:200]}")
                 return False
         except Exception as error:
             logger.warn(error)
@@ -397,7 +396,7 @@ class MHSANAEI:
         inbound_id: int,
     ):
         try:
-            logger.info(f"Get client stats from {self._host.name} inbound {inbound_id}")
+            logger.debug(f"Get client stats from {self._host.name} inbound {inbound_id}")
 
             url = f"{self._base_api_url}/inbounds/get/{inbound_id}"
 
@@ -411,9 +410,7 @@ class MHSANAEI:
             data = response.json()
 
             if data.get("obj") is not None:
-                stats = data["obj"].get("clientStats")
-                logger.info(f"clientStats for inbound {inbound_id}: {str(stats)[:500]}")
-                return stats
+                return data["obj"].get("clientStats")
 
             return None
         except Exception as error:
@@ -454,11 +451,9 @@ class MHSANAEI:
         inbound_id: int,
     ):
         try:
-            logger.info(f"Get clients from {self._host.name} inbound {inbound_id}")
+            logger.debug(f"Get clients from {self._host.name} inbound {inbound_id}")
 
             url = f"{self._base_api_url}/inbounds/get/{inbound_id}"
-
-            logger.info(f"Calling URL: {url}")
 
             inbound_stat = requests.get(
                 url,
@@ -467,10 +462,9 @@ class MHSANAEI:
                 timeout=config.X_UI_REQUEST_TIMEOUT,
             )
 
-            logger.info(
+            logger.debug(
                 f"Status code: {inbound_stat.status_code} for Inbound {inbound_id}"
             )
-            logger.info(f"Response text for Inbound {inbound_id}: {inbound_stat.text[:500]}")
 
             if inbound_stat.status_code != 200:
                 logger.warn(f"Non-200 response ({inbound_stat.status_code}) for inbound {inbound_id}")
