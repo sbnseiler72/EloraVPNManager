@@ -262,7 +262,7 @@ class MHSANAEI:
 
             url = f"{self._base_api_url}/clients/add"
 
-            logger.debug(f"Final url for add client is: {url}")
+            logger.info(f"Final url for add client is: {url}")
 
             payload_add_client = json.dumps({
                 "client": {
@@ -280,7 +280,7 @@ class MHSANAEI:
                 "inboundIds": [inbound_id],
             })
 
-            logger.debug(f"Final payload to add client is: {payload_add_client}")
+            logger.info(f"Final payload to add client is: {payload_add_client}")
 
             response = requests.post(
                 url,
@@ -290,17 +290,18 @@ class MHSANAEI:
                 headers=headers,
                 timeout=config.X_UI_REQUEST_TIMEOUT,
             )
-            data = response.json()
 
-            logger.debug(f"Response code: {response.status_code}")
-            logger.debug(f"Response text: {response.text}")
+            logger.info(f"add_client response code: {response.status_code}")
+            logger.info(f"add_client response text: {response.text[:500]}")
+
+            data = response.json()
 
             if response.status_code == 200 and data["success"] == True:
                 return True
             else:
                 return False
         except Exception as error:
-            logger.warn(error)
+            logger.warn(f"add_client error: {error}")
             return False
 
     def update_client(
