@@ -44,18 +44,38 @@ class MHSANAEI:
 
     def _get_login_cookie(self):
         base_login_url = self._base_api_url.replace("/panel/api", "")
+
+        # 3x-ui v3 requires a CSRF token on all unsafe (POST) requests.
+        # Use a session so the pre-login session cookie is carried into the login call.
+        session = requests.Session()
+        csrf_token = None
+        try:
+            csrf_url = base_login_url + "/csrf-token"
+            csrf_resp = session.get(
+                csrf_url, verify=False, timeout=config.X_UI_REQUEST_TIMEOUT
+            )
+            if csrf_resp.status_code == 200:
+                csrf_token = csrf_resp.json().get("obj")
+                logger.info(f"CSRF token fetched: {bool(csrf_token)}")
+        except Exception as e:
+            logger.warn(f"Could not fetch CSRF token: {e}")
+
         login_url = base_login_url + "/login"
         payload = {"username": self._host.username, "password": self._host.password}
+        headers = {}
+        if csrf_token:
+            headers["X-CSRF-Token"] = csrf_token
+
         logger.info("Try login with url: " + login_url)
-        req = requests.request(
-            "POST",
+        req = session.post(
             login_url,
             data=payload,
+            headers=headers,
             verify=False,
             timeout=config.X_UI_REQUEST_TIMEOUT,
         )
-        logger.info(f"Login status: {req.status_code}, cookies: {dict(req.cookies)}, response: {req.text[:200]}")
-        return req.cookies
+        logger.info(f"Login status: {req.status_code}, cookies: {dict(session.cookies)}, response: {req.text[:200]}")
+        return session.cookies
 
     @staticmethod
     def get_account_email_prefix(inbound_key: int, email: str):
