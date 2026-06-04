@@ -397,7 +397,7 @@ class MHSANAEI:
         inbound_id: int,
     ):
         try:
-            logger.debug(f"Get clients from {self._host.name} inbound {inbound_id}")
+            logger.info(f"Get client stats from {self._host.name} inbound {inbound_id}")
 
             url = f"{self._base_api_url}/inbounds/get/{inbound_id}"
 
@@ -411,7 +411,9 @@ class MHSANAEI:
             data = response.json()
 
             if data.get("obj") is not None:
-                return data["obj"].get("clientStats")
+                stats = data["obj"].get("clientStats")
+                logger.info(f"clientStats for inbound {inbound_id}: {str(stats)[:500]}")
+                return stats
 
             return None
         except Exception as error:
