@@ -418,9 +418,10 @@ class MHSANAEI:
                 timeout=config.X_UI_REQUEST_TIMEOUT,
             )
 
-            logger.debug(
+            logger.info(
                 f"Status code: {inbound_stat.status_code} for Inbound {inbound_id}"
             )
+            logger.info(f"Response text for Inbound {inbound_id}: {inbound_stat.text[:500]}")
 
             data = inbound_stat.json()
 
