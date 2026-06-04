@@ -46,7 +46,7 @@ class MHSANAEI:
         base_login_url = self._base_api_url.replace("/panel/api", "")
         login_url = base_login_url + "/login"
         payload = {"username": self._host.username, "password": self._host.password}
-        logger.debug("Try login with url: " + login_url)
+        logger.info("Try login with url: " + login_url)
         req = requests.request(
             "POST",
             login_url,
@@ -54,7 +54,7 @@ class MHSANAEI:
             verify=False,
             timeout=config.X_UI_REQUEST_TIMEOUT,
         )
-        logger.debug(f"Login response: {req.text}")
+        logger.info(f"Login status: {req.status_code}, cookies: {dict(req.cookies)}, response: {req.text[:200]}")
         return req.cookies
 
     @staticmethod
