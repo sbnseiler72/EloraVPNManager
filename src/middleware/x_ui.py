@@ -274,7 +274,7 @@ class MHSANAEI:
                     "totalGB": data_limit,
                     "expiryTime": expire_time,
                     "enable": enable,
-                    "tgId": "",
+                    "tgId": 0,
                     "subId": "",
                 },
                 "inboundIds": [inbound_id],
