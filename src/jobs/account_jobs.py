@@ -269,13 +269,39 @@ def sync_new_accounts():
                     logger.info(f"Account email: {account.email}")
                     logger.info(f"Account Expire time: {account.expired_at}")
 
-                    xui.api.add_client(
+                    added = xui.api.add_client(
                         inbound_id=inbound.key,
                         email=account_unique_email,
                         uuid=account.uuid,
                         flow=inbound.flow.value if inbound.flow else "",
                         ip_limit=account.ip_limit,
                     )
+                    if not added:
+                        logger.warning(
+                            f"add_client failed for {account_unique_email} in inbound {inbound.key} on host {host.name}, attempting delete+retry"
+                        )
+                        client_stat = xui.api.get_client_stat(account_unique_email)
+                        if client_stat is not None:
+                            deleted = xui.api.delete_client(
+                                inbound_id=inbound.key,
+                                uuid=account.uuid,
+                                email=account_unique_email,
+                            )
+                            if deleted:
+                                logger.info(
+                                    f"Deleted orphaned client {account_unique_email}, retrying add"
+                                )
+                                xui.api.add_client(
+                                    inbound_id=inbound.key,
+                                    email=account_unique_email,
+                                    uuid=account.uuid,
+                                    flow=inbound.flow.value if inbound.flow else "",
+                                    ip_limit=account.ip_limit,
+                                )
+                            else:
+                                logger.error(
+                                    f"Could not delete orphaned client {account_unique_email} — manual cleanup required in x-ui host {host.name}"
+                                )
         end = datetime.utcnow().timestamp()
         logger.info(f"End Sync new accounts in all Inbounds in {end - start} Sec")
 

@@ -205,24 +205,25 @@ class MHSANAEI:
             logger.warn(error)
             return False
 
-    def delete_client(self, inbound_id: int, uuid: str):
+    def delete_client(self, inbound_id: int, uuid: str, email: str = None):
         try:
             headers = self._post_headers()
 
-            # New API deletes by email; look up the email from the inbound's client list.
-            clients = self.get_inbound_clients(inbound_id)
-            if not clients:
-                logger.warn(f"No clients found in inbound {inbound_id} for uuid {uuid}")
-                return False
-
-            client_email = None
-            for client in clients:
-                if client.get("id") == uuid:
-                    client_email = client.get("email")
-                    break
+            client_email = email
 
             if client_email is None:
-                logger.warn(f"Client with uuid {uuid} not found in inbound {inbound_id}")
+                # Look up the email from the inbound's client list.
+                clients = self.get_inbound_clients(inbound_id)
+                if clients:
+                    for client in clients:
+                        if client.get("id") == uuid:
+                            client_email = client.get("email")
+                            break
+
+            if client_email is None:
+                logger.warn(
+                    f"Client with uuid {uuid} not found in inbound {inbound_id} — client may be orphaned (no inbound assigned)"
+                )
                 return False
 
             url = f"{self._base_api_url}/clients/del/{client_email}"
@@ -297,9 +298,26 @@ class MHSANAEI:
             logger.debug(f"add_client response code: {response.status_code}")
 
             if response.status_code == 200 and data["success"] == True:
+                # Verify the client was actually assigned to the inbound.
+                # Some x-ui versions accept the request but ignore inboundIds, leaving
+                # the client orphaned (no inbound). Detect this early.
+                inbound_clients = self.get_inbound_clients(inbound_id)
+                if inbound_clients is None or not any(
+                    c.get("email", "") == email for c in inbound_clients
+                ):
+                    logger.warning(
+                        f"add_client: client {email} created in x-ui but NOT assigned to inbound {inbound_id} — orphaned client detected"
+                    )
+                    return False
                 return True
             else:
-                logger.warn(f"add_client failed: {response.status_code} {response.text[:200]}")
+                msg = data.get("msg", "")
+                if "email already in use" in msg:
+                    logger.warning(
+                        f"add_client: email already in use ({email}) — client exists in x-ui but may not be assigned to inbound {inbound_id}"
+                    )
+                else:
+                    logger.warn(f"add_client failed: {response.status_code} {response.text[:200]}")
                 return False
         except Exception as error:
             logger.warn(f"add_client error: {error}")
