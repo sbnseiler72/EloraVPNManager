@@ -27,6 +27,7 @@ class MHSANAEI:
             api_path=host.api_path, ssl=self._host.master
         )
         self._login_cookies = self._get_login_cookie()
+        self._csrf_token = self._fetch_csrf_token()
 
     def _generate_base_url(self, ssl: bool = False, api_path: str = ""):
         address = self._host.ip if self._host.domain is None else self._host.domain
@@ -44,18 +45,64 @@ class MHSANAEI:
 
     def _get_login_cookie(self):
         base_login_url = self._base_api_url.replace("/panel/api", "")
+
+        # 3x-ui v3 requires a CSRF token on all unsafe (POST) requests.
+        # Use a session so the pre-login session cookie is carried into the login call.
+        session = requests.Session()
+        csrf_token = None
+        try:
+            csrf_url = base_login_url + "/csrf-token"
+            csrf_resp = session.get(
+                csrf_url, verify=False, timeout=config.X_UI_REQUEST_TIMEOUT
+            )
+            if csrf_resp.status_code == 200:
+                csrf_token = csrf_resp.json().get("obj")
+                logger.debug(f"Pre-login CSRF token fetched: {bool(csrf_token)}")
+        except Exception as e:
+            logger.warn(f"Could not fetch CSRF token: {e}")
+
         login_url = base_login_url + "/login"
         payload = {"username": self._host.username, "password": self._host.password}
+        headers = {}
+        if csrf_token:
+            headers["X-CSRF-Token"] = csrf_token
+
         logger.debug("Try login with url: " + login_url)
-        req = requests.request(
-            "POST",
+        req = session.post(
             login_url,
             data=payload,
+            headers=headers,
             verify=False,
             timeout=config.X_UI_REQUEST_TIMEOUT,
         )
-        logger.debug(f"Login response: {req.text}")
-        return req.cookies
+        if req.status_code == 200:
+            logger.info(f"Login successful for host {self._host.name}")
+        else:
+            logger.warn(f"Login failed for host {self._host.name}: status {req.status_code}")
+        return session.cookies
+
+    def _fetch_csrf_token(self):
+        base_url = self._base_api_url.replace("/panel/api", "")
+        try:
+            resp = requests.get(
+                base_url + "/csrf-token",
+                cookies=self._login_cookies,
+                verify=False,
+                timeout=config.X_UI_REQUEST_TIMEOUT,
+            )
+            if resp.status_code == 200:
+                token = resp.json().get("obj")
+                logger.debug(f"Post-login CSRF token fetched: {bool(token)}")
+                return token
+        except Exception as e:
+            logger.warn(f"Could not fetch post-login CSRF token: {e}")
+        return None
+
+    def _post_headers(self):
+        headers = {"Content-type": "application/json", "Accept": "text/plain"}
+        if self._csrf_token:
+            headers["X-CSRF-Token"] = self._csrf_token
+        return headers
 
     @staticmethod
     def get_account_email_prefix(inbound_key: int, email: str):
@@ -78,7 +125,7 @@ class MHSANAEI:
 
     def get_client_stat(self, email: str):
         try:
-            url = f"{self._base_api_url}/inbounds/getClientTraffics/{email}"
+            url = f"{self._base_api_url}/clients/traffic/{email}"
             client_stat = requests.get(
                 url,
                 cookies=self._login_cookies,
@@ -104,9 +151,9 @@ class MHSANAEI:
             return None
 
     def reset_client_traffic(self, inbound_id: int, email: str):
-        headers = {"Content-type": "application/json", "Accept": "text/plain"}
+        headers = self._post_headers()
 
-        url = f"{self._base_api_url}/inbounds/{inbound_id}/resetClientTraffic/{email}"
+        url = f"{self._base_api_url}/clients/resetTraffic/{email}"
 
         logger.debug(f"Final url for reset client traffic is: {url}")
 
@@ -131,11 +178,11 @@ class MHSANAEI:
             return False
 
     def reset_clients_traffic(self, inbound_id: int):
-        headers = {"Content-type": "application/json", "Accept": "text/plain"}
+        headers = self._post_headers()
 
-        url = f"{self._base_api_url}/inbounds/resetAllClientTraffics/{inbound_id}"
+        url = f"{self._base_api_url}/clients/resetAllTraffics"
 
-        logger.info(f"Final url for reset client traffic is: {url}")
+        logger.debug(f"Final url for reset clients traffic is: {url}")
 
         try:
             response = requests.post(
@@ -159,11 +206,26 @@ class MHSANAEI:
             return False
 
     def delete_client(self, inbound_id: int, uuid: str):
-
         try:
-            headers = {"Content-type": "application/json", "Accept": "text/plain"}
+            headers = self._post_headers()
 
-            url = f"{self._base_api_url}/inbounds/{inbound_id}/delClient/{uuid}"
+            # New API deletes by email; look up the email from the inbound's client list.
+            clients = self.get_inbound_clients(inbound_id)
+            if not clients:
+                logger.warn(f"No clients found in inbound {inbound_id} for uuid {uuid}")
+                return False
+
+            client_email = None
+            for client in clients:
+                if client.get("id") == uuid:
+                    client_email = client.get("email")
+                    break
+
+            if client_email is None:
+                logger.warn(f"Client with uuid {uuid} not found in inbound {inbound_id}")
+                return False
+
+            url = f"{self._base_api_url}/clients/del/{client_email}"
 
             logger.debug(f"Final url for delete client is: {url}")
 
@@ -175,8 +237,8 @@ class MHSANAEI:
                 timeout=config.X_UI_REQUEST_TIMEOUT,
             )
             data = response.json()
-            logger.info(f"Response code: {response.status_code}")
-            logger.info(f"Response text: {response.text}")
+            logger.debug(f"Response code: {response.status_code}")
+            logger.debug(f"Response text: {response.text}")
 
             if response.status_code == 200 and data["success"] == True:
                 return True
@@ -199,24 +261,27 @@ class MHSANAEI:
     ):
 
         try:
-            headers = {"Content-type": "application/json", "Accept": "text/plain"}
+            headers = self._post_headers()
 
-            url = f"{self._base_api_url}/inbounds/addClient"
+            url = f"{self._base_api_url}/clients/add"
 
-            logger.debug(f"Final url fro add client is: {url}")
+            logger.debug(f"Final url for add client is: {url}")
 
-            payload_add_client = MHSANAEI.get_client_payload(
-                data_limit,
-                email,
-                enable,
-                expire_time,
-                inbound_id,
-                uuid,
-                ip_limit=ip_limit,
-                flow=flow,
-            )
-
-            logger.debug(f"Final payload to add client is: {payload_add_client}")
+            payload_add_client = json.dumps({
+                "client": {
+                    "id": uuid,
+                    "flow": flow,
+                    "alterId": 0,
+                    "email": email,
+                    "limitIp": ip_limit,
+                    "totalGB": data_limit,
+                    "expiryTime": expire_time,
+                    "enable": enable,
+                    "tgId": 0,
+                    "subId": "",
+                },
+                "inboundIds": [inbound_id],
+            })
 
             response = requests.post(
                 url,
@@ -226,17 +291,18 @@ class MHSANAEI:
                 headers=headers,
                 timeout=config.X_UI_REQUEST_TIMEOUT,
             )
+
             data = response.json()
 
-            logger.debug(f"Response code: {response.status_code}")
-            logger.debug(f"Response text: {response.text}")
+            logger.debug(f"add_client response code: {response.status_code}")
 
             if response.status_code == 200 and data["success"] == True:
                 return True
             else:
+                logger.warn(f"add_client failed: {response.status_code} {response.text[:200]}")
                 return False
         except Exception as error:
-            logger.warn(error)
+            logger.warn(f"add_client error: {error}")
             return False
 
     def update_client(
@@ -251,29 +317,29 @@ class MHSANAEI:
         enable: bool = True,
     ):
         try:
-            headers = {"Content-type": "application/json", "Accept": "text/plain"}
+            headers = self._post_headers()
 
-            url = f"{self._base_api_url}/inbounds/updateClient/{uuid}"
+            url = f"{self._base_api_url}/clients/update/{email}"
 
             logger.debug(f"Final url for update client is: {url}")
 
-            payload_add_client = MHSANAEI.get_client_payload(
-                data_limit,
-                email,
-                enable,
-                expire_time,
-                inbound_id,
-                uuid,
-                ip_limit=ip_limit,
-                flow=flow,
-            )
-
-            logger.debug(f"Final payload to update is: {payload_add_client}")
+            payload_update_client = json.dumps({
+                "id": uuid,
+                "flow": flow,
+                "alterId": 0,
+                "email": email,
+                "limitIp": ip_limit,
+                "totalGB": data_limit,
+                "expiryTime": expire_time,
+                "enable": enable,
+                "tgId": 0,
+                "subId": "",
+            })
 
             response = requests.post(
                 url,
                 cookies=self._login_cookies,
-                data=payload_add_client,
+                data=payload_update_client,
                 verify=False,
                 headers=headers,
                 timeout=config.X_UI_REQUEST_TIMEOUT,
@@ -281,11 +347,11 @@ class MHSANAEI:
             data = response.json()
 
             logger.debug(f"Response code: {response.status_code}")
-            logger.debug(f"Response text: {response.text}")
 
             if response.status_code == 200 and data["success"] is True:
                 return True
             else:
+                logger.warn(f"update_client failed: {response.status_code} {response.text[:200]}")
                 return False
         except Exception as error:
             logger.warn(error)
@@ -315,7 +381,7 @@ class MHSANAEI:
             "totalGB": data_limit,
             "expiryTime": expire_time,
             "enable": enable,
-            "tgId": "",
+            "tgId": 0,
             "subId": "",
         }
         clients = [client]
@@ -330,9 +396,9 @@ class MHSANAEI:
         inbound_id: int,
     ):
         try:
-            logger.debug(f"Get clients from {self._host.name} inbound {inbound_id}")
+            logger.debug(f"Get client stats from {self._host.name} inbound {inbound_id}")
 
-            url = f"{self._base_api_url}/inbounds/list"
+            url = f"{self._base_api_url}/inbounds/get/{inbound_id}"
 
             response = requests.get(
                 url,
@@ -343,12 +409,8 @@ class MHSANAEI:
 
             data = response.json()
 
-            remote_inbound_list = data["obj"]
-
-            if remote_inbound_list is not None:
-                for remote_inbound in remote_inbound_list:
-                    if int(remote_inbound["id"]) == inbound_id:
-                        return remote_inbound["clientStats"]
+            if data.get("obj") is not None:
+                return data["obj"].get("clientStats")
 
             return None
         except Exception as error:
@@ -389,7 +451,7 @@ class MHSANAEI:
         inbound_id: int,
     ):
         try:
-            logger.info(f"Get clients from {self._host.name} inbound {inbound_id}")
+            logger.debug(f"Get clients from {self._host.name} inbound {inbound_id}")
 
             url = f"{self._base_api_url}/inbounds/get/{inbound_id}"
 
@@ -404,12 +466,17 @@ class MHSANAEI:
                 f"Status code: {inbound_stat.status_code} for Inbound {inbound_id}"
             )
 
+            if inbound_stat.status_code != 200:
+                logger.warn(f"Non-200 response ({inbound_stat.status_code}) for inbound {inbound_id}")
+                return None
+
             data = inbound_stat.json()
 
             settings = data["obj"]["settings"]
 
             if settings:
-                setting_obj = json.loads(settings)
+                # New API returns settings as a nested object; legacy versions return a JSON string.
+                setting_obj = json.loads(settings) if isinstance(settings, str) else settings
                 clients = setting_obj["clients"]
                 return clients
             else:
