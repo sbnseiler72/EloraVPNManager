@@ -411,6 +411,8 @@ class MHSANAEI:
 
             url = f"{self._base_api_url}/inbounds/get/{inbound_id}"
 
+            logger.info(f"Calling URL: {url}")
+
             inbound_stat = requests.get(
                 url,
                 cookies=self._login_cookies,
@@ -422,6 +424,10 @@ class MHSANAEI:
                 f"Status code: {inbound_stat.status_code} for Inbound {inbound_id}"
             )
             logger.info(f"Response text for Inbound {inbound_id}: {inbound_stat.text[:500]}")
+
+            if inbound_stat.status_code != 200:
+                logger.warn(f"Non-200 response ({inbound_stat.status_code}) for inbound {inbound_id}")
+                return None
 
             data = inbound_stat.json()
 
