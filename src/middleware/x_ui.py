@@ -50,7 +50,7 @@ class MHSANAEI:
         req = requests.request(
             "POST",
             login_url,
-            json=payload,
+            data=payload,
             verify=False,
             timeout=config.X_UI_REQUEST_TIMEOUT,
         )
