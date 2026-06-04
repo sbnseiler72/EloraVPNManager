@@ -152,7 +152,7 @@ class MHSANAEI:
 
         url = f"{self._base_api_url}/clients/resetTraffic/{email}"
 
-        logger.debug(f"Final url for reset client traffic is: {url}")
+        logger.info(f"Final url for reset client traffic is: {url}")
 
         try:
             response = requests.post(
@@ -163,8 +163,8 @@ class MHSANAEI:
                 timeout=config.X_UI_REQUEST_TIMEOUT,
             )
             data = response.json()
-            logger.debug(f"Response code: {response.status_code}")
-            logger.debug(f"Response text: {response.text}")
+            logger.info(f"reset_client_traffic response code: {response.status_code}")
+            logger.info(f"reset_client_traffic response text: {response.text}")
 
             if response.status_code == 200 and data["success"] == True:
                 return True
